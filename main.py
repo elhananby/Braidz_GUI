@@ -1,15 +1,36 @@
+
+import random
+from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg
+from matplotlib.figure import Figure
+
+import matplotlib.pyplot as plt
+import matplotlib as mpl
+from mpl_toolkits.mplot3d import Axes3D
+
 import numpy as np
 import pandas as pd
 from PyQt5 import QtWidgets, QtCore, QtGui
 import zipfile
 import traceback, sys
-from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
-from mpl_toolkits import mplot3d
-import matplotlib.pyplot as plt
-from pyqtgraph import PlotWidget, plot
-import pyqtgraph as pg
-import pyqtgraph.opengl as gl
 
+import matplotlib
+
+matplotlib.use('Qt5Agg')
+
+
+class MplCanvas(FigureCanvasQTAgg):
+
+    def __init__(self, parent=None, width=5, height=4, dpi=100):
+        fig = Figure(figsize=(width, height), dpi=dpi)
+        super(MplCanvas, self).__init__(fig)
+        self.axes = fig.add_subplot(111, projection='3d')
+        self.axes.clear()
+        self.axes.set_xlim((-0.25, 0.25))
+        self.axes.set_ylim((-0.25, 0.25))
+        self.axes.set_zlim((0., 0.3))
+
+    def plot_data(self, x, y, z):
+        self.axes.plot(x, y, z)
 
 class WorkerSignals(QtCore.QObject):
     """
@@ -76,21 +97,6 @@ class Worker(QtCore.QRunnable):
             self.signals.finished.emit()  # Done
 
 
-def _open_file(file_name):
-    if file_name:
-        if file_name.endswith(".braidz"):
-            archive = zipfile.ZipFile(file=file_name, mode='r')
-            df = pd.read_csv(
-                archive.open('kalman_estimates.csv.gz'),
-                comment="#",
-                compression="gzip")
-
-        elif file_name.endswith(".h5"):
-            df = pd.read_hdf(file_name, key='kalman_estimates', mode='r')
-
-    return df
-
-
 class MainWindow(QtWidgets.QWidget):
     def __init__(self):
         super().__init__()
@@ -104,12 +110,13 @@ class MainWindow(QtWidgets.QWidget):
         self.initialize_ui()
 
     def initialize_ui(self):
-        outer_layout = QtWidgets.QHBoxLayout()  # main two-column layout
-        left_layout = QtWidgets.QVBoxLayout()  # left layout for open file button, filter menu, and item list
+        self.outer_layout = QtWidgets.QHBoxLayout()  # main two-column layout
+        self.left_layout = QtWidgets.QVBoxLayout()  # left layout for open file button, filter menu, and item list
+        self.right_layout = QtWidgets.QVBoxLayout()
 
-        # button to open file
+        # open button
         self.open_button = QtWidgets.QPushButton("Browse...")
-        self.open_button.clicked.connect(self.open_file)
+        self.open_button.clicked.connect(self.open_file_callback)
 
         # status line
         self.status_line = QtWidgets.QLabel()
@@ -124,64 +131,71 @@ class MainWindow(QtWidgets.QWidget):
 
         # list view
         self.obj_list_widget = QtWidgets.QListWidget()
-        #self.obj_list_widget.setSelectionMode(QtWidgets.QListWidget.MultiSelection)
-        self.obj_list_widget.itemClicked.connect(self._obj_selected)
+        self.obj_list_widget.itemClicked.connect(self.obj_selected)
 
         # configure left layout
-        left_layout.addWidget(self.open_button)
-        left_layout.addWidget(self.status_line)
-        left_layout.addLayout(self.grid_layout)
-        left_layout.addWidget(self.obj_list_widget)
+        self.left_layout.addWidget(self.open_button)
+        self.left_layout.addWidget(self.status_line)
+        self.left_layout.addLayout(self.grid_layout)
+        self.left_layout.addWidget(self.obj_list_widget)
 
-        # plot frame
-        # figure_frame = QtWidgets.QFrame()
-        self.figure_widget = gl.GLViewWidget()
+        # define figure
+        self.sc = MplCanvas(self, width=5, height=4, dpi=100)
 
         # configure outer layout
-        outer_layout.addLayout(left_layout, 1)
-        outer_layout.addWidget(self.figure_widget, 4)
+        self.outer_layout.addLayout(self.left_layout, 1)
+        self.outer_layout.addWidget(self.sc, 4)
 
-        self.setLayout(outer_layout)
+        # set complete layout
+        self.setLayout(self.outer_layout)
 
-    def open_file(self):
+    def obj_selected(self, item):
+        obj_id = int(item.text())
+        obj_idx = (self.df['obj_id'] == obj_id).values
+        x = self.df[obj_idx]['x'].values
+        y = self.df[obj_idx]['y'].values
+        z = self.df[obj_idx]['z'].values
+
+        self.sc.plot_data(x, y, z)
+        self.sc.draw()
+
+    def populate_list(self):
+        for obj, data in self.df.groupby('obj_id'):
+            if len(data) >= 1000:
+                self.obj_list_widget.addItem(str(obj))
+
+    def open_file_callback(self):
         options = QtWidgets.QFileDialog.Options()
         self.file_name, _ = QtWidgets.QFileDialog.getOpenFileName(self,
                                                                   caption="Open File",
                                                                   filter="Braidz (*.braidz);;flydra h5 (*.h5)",
                                                                   options=options)
         self.status_line.setText("Opening file...")
-        worker = Worker(_open_file, self.file_name)
-        worker.signals.finished.connect(self._thread_complete)
-        worker.signals.result.connect(self._get_data)
+        worker = Worker(self.open_file, self.file_name)
+        worker.signals.finished.connect(self.thread_complete)
+        worker.signals.result.connect(self.get_data)
         self.thread_pool.start(worker)
 
-    def populate_list(self):
-        for obj, _ in self.df.groupby('obj_id'):
-            self.obj_list_widget.addItem(str(obj))
-
-    def filter_objects(self):
-        pass
-
-    def _obj_selected(self, item):
-        traces = []
-        obj_id = int(item.text())
-        obj_idx = (self.df['obj_id'] == obj_id).values
-        pts = np.column_stack((self.df[obj_idx]['x'].values,
-                               self.df[obj_idx]['y'].values,
-                               self.df[obj_idx]['z'].values))
-        traces.append(gl.GLLinePlotItem(pos=pts))
-        self.plot_obj(traces)
-
-    def plot_obj(self, traces):
-        for trace in traces:
-            self.figure_widget.addItem(trace)
-
-    def _thread_complete(self):
+    def thread_complete(self):
         self.status_line.setText("Finished opening")
         self.populate_list()
 
-    def _get_data(self, result):
+    def get_data(self, result):
         self.df = result
+
+    def open_file(self, file_name):
+        if file_name:
+            if file_name.endswith(".braidz"):
+                archive = zipfile.ZipFile(file=file_name, mode='r')
+                df = pd.read_csv(
+                    archive.open('kalman_estimates.csv.gz'),
+                    comment="#",
+                    compression="gzip")
+
+            elif file_name.endswith(".h5"):
+                df = pd.read_hdf(file_name, key='kalman_estimates', mode='r')
+
+        return df
 
 
 if __name__ == '__main__':
@@ -189,4 +203,3 @@ if __name__ == '__main__':
     window = MainWindow()
     window.show()
     sys.exit(app.exec_())
-
