@@ -1,7 +1,8 @@
-
 import random
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
+
+from fastnumbers import fast_real
 
 import matplotlib.pyplot as plt
 import matplotlib as mpl
@@ -12,6 +13,9 @@ import pandas as pd
 from PyQt5 import QtWidgets, QtCore, QtGui
 import zipfile
 import traceback, sys
+import re
+
+from braid_analysis import braid_slicing
 
 import matplotlib
 
@@ -25,12 +29,14 @@ class MplCanvas(FigureCanvasQTAgg):
         super(MplCanvas, self).__init__(fig)
         self.axes = fig.add_subplot(111, projection='3d')
         self.axes.clear()
+
+
+    def plot_data(self, x, y, z):
         self.axes.set_xlim((-0.25, 0.25))
         self.axes.set_ylim((-0.25, 0.25))
         self.axes.set_zlim((0., 0.3))
-
-    def plot_data(self, x, y, z):
         self.axes.plot(x, y, z)
+
 
 class WorkerSignals(QtCore.QObject):
     """
@@ -103,7 +109,15 @@ class MainWindow(QtWidgets.QWidget):
         self.setWindowTitle("Braidz GUI")
         self.setGeometry(100, 100, 800, 600)
         self.file_name = None
+
         self.df = pd.DataFrame([])
+        self.min_obs = 1000
+        self.xlim = [-.25, .25]
+        self.ylim = [-.25, .25]
+        self.zlim = [0., 0.3]
+        self.dist = 0.0
+
+        self.keep_plot = False
 
         self.thread_pool = QtCore.QThreadPool()
 
@@ -124,10 +138,37 @@ class MainWindow(QtWidgets.QWidget):
 
         # grid layout for limits and obs numbers
         self.grid_layout = QtWidgets.QFormLayout()
-        self.grid_layout.addRow("Min Obs.", QtWidgets.QLineEdit())
-        self.grid_layout.addRow("Xlim", QtWidgets.QLineEdit())
-        self.grid_layout.addRow("Ylim", QtWidgets.QLineEdit())
-        self.grid_layout.addRow("Zlim", QtWidgets.QLineEdit())
+
+        self.min_obs_widget = QtWidgets.QLineEdit()
+        self.min_obs_widget.setText(str(self.min_obs))
+        self.min_obs_widget.setReadOnly(True)
+        self.min_obs_widget.returnPressed.connect(self.update_values)
+
+        self.xlim_widget = QtWidgets.QLineEdit()
+        self.xlim_widget.setText(str(self.xlim))
+        self.xlim_widget.setReadOnly(True)
+        self.xlim_widget.returnPressed.connect(self.update_values)
+
+        self.ylim_widget = QtWidgets.QLineEdit()
+        self.ylim_widget.setText(str(self.ylim))
+        self.ylim_widget.setReadOnly(True)
+        self.ylim_widget.returnPressed.connect(self.update_values)
+
+        self.zlim_widget = QtWidgets.QLineEdit()
+        self.zlim_widget.setText(str(self.zlim))
+        self.zlim_widget.setReadOnly(True)
+        self.zlim_widget.returnPressed.connect(self.update_values)
+
+        self.dist_widget = QtWidgets.QLineEdit()
+        self.dist_widget.setText(str(self.dist))
+        self.dist_widget.setReadOnly(True)
+        self.dist_widget.returnPressed.connect(self.update_values)
+
+        self.grid_layout.addRow("Min Obs.", self.min_obs_widget)
+        self.grid_layout.addRow("Xlim", self.xlim_widget)
+        self.grid_layout.addRow("Ylim", self.ylim_widget)
+        self.grid_layout.addRow("Zlim", self.zlim_widget)
+        self.grid_layout.addRow("Dist", self.dist_widget)
 
         # list view
         self.obj_list_widget = QtWidgets.QListWidget()
@@ -156,13 +197,52 @@ class MainWindow(QtWidgets.QWidget):
         y = self.df[obj_idx]['y'].values
         z = self.df[obj_idx]['z'].values
 
+        if not self.keep_plot:
+            self.sc.axes.clear()
+
         self.sc.plot_data(x, y, z)
         self.sc.draw()
 
+    def update_values(self):
+        self.min_obs = fast_real(re.compile(r'\d+').findall(self.min_obs_widget.text())[0])
+
+        p = re.compile(r'-?\d+\.\d+')
+
+        self.xlim = [fast_real(i) for i in p.findall(self.xlim_widget.text())]
+
+        self.ylim = [fast_real(i) for i in p.findall(self.ylim_widget.text())]
+
+        self.zlim = [fast_real(i) for i in p.findall(self.zlim_widget.text())]
+
+        self.dist = fast_real(p.findall(self.dist_widget.text())[0])
+
+        self.populate_list()
+
     def populate_list(self):
-        for obj, data in self.df.groupby('obj_id'):
-            if len(data) >= 1000:
-                self.obj_list_widget.addItem(str(obj))
+
+        self.obj_list_widget.clear()
+        obj_ids = braid_slicing.get_long_obj_ids_fast_pandas(self.df, length=self.min_obs)
+
+        obj_ids = braid_slicing.get_middle_of_tunnel_obj_ids_fast_pandas(
+            self.df[self.df['obj_id'].isin(obj_ids)],
+            zmin=self.zlim[0], zmax=self.zlim[1],
+            ymin=self.ylim[0], ymax=self.ylim[1],
+            xmin=self.xlim[0], xmax=self.xlim[1]
+        )
+
+        obj_ids = braid_slicing.get_trajectories_that_travel_far(
+            self.df[self.df['obj_id'].isin(obj_ids)],
+            axis='z',
+            dist_travelled=self.dist
+        )
+
+        self.obj_list_widget.addItems([str(obj) for obj in obj_ids])
+
+        self.min_obs_widget.setReadOnly(False)
+        self.xlim_widget.setReadOnly(False)
+        self.ylim_widget.setReadOnly(False)
+        self.zlim_widget.setReadOnly(False)
+        self.dist_widget.setReadOnly(False)
 
     def open_file_callback(self):
         options = QtWidgets.QFileDialog.Options()
