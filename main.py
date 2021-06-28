@@ -25,10 +25,13 @@ matplotlib.use('Qt5Agg')
 
 class MplCanvas(FigureCanvasQTAgg):
 
-    def __init__(self, parent=None, width=5, height=4, dpi=100):
+    def __init__(self, parent=None, width=5, height=4, dpi=100, proj='3d'):
         fig = Figure(figsize=(width, height), dpi=dpi)
         super(MplCanvas, self).__init__(fig)
-        self.axes = fig.add_subplot(111, projection='3d')
+        if proj == '3d':
+            self.axes = fig.add_subplot(111, projection='3d')
+        else:
+            self.axes = fig.add_subplot(111)
         self.axes.clear()
 
     def plot_data(self, x, y, z):
@@ -37,6 +40,9 @@ class MplCanvas(FigureCanvasQTAgg):
         self.axes.set_zlim((0., 0.3))
         self.axes.plot(x, y, z)
 
+    def plot_hist(self, vals):
+        self.axes.clear()
+        self.axes.hist(vals, bins=100, orientation='horizontal')
 
 class WorkerSignals(QtCore.QObject):
     """
@@ -173,6 +179,7 @@ class MainWindow(QtWidgets.QWidget):
 
         # widget to select which distance we're interested in
         self.axes_selector = QtWidgets.QHBoxLayout()
+
         self.x_selector = QtWidgets.QCheckBox("x")
         self.x_selector.setChecked(True)
         self.x_selector.stateChanged.connect(self.axes_select)
@@ -181,7 +188,7 @@ class MainWindow(QtWidgets.QWidget):
         self.y_selector = QtWidgets.QCheckBox("y")
         self.y_selector.setChecked(True)
         self.y_selector.stateChanged.connect(self.axes_select)
-        self.z_selector.setDisabled(True)
+        self.y_selector.setDisabled(True)
 
         self.z_selector = QtWidgets.QCheckBox("z")
         self.z_selector.setChecked(True)
@@ -211,12 +218,19 @@ class MainWindow(QtWidgets.QWidget):
         self.left_layout.addWidget(self.obj_list_widget)
 
         # define figure
-        self.sc = MplCanvas(self, width=5, height=4, dpi=100)
+        self.traj_fig = MplCanvas(self, width=5, height=4, dpi=100)
+
+        # define statistics figure
+        self.stats_figs = QtWidgets.QVBoxLayout()
+        self.obs_hist = MplCanvas(self, width=2, height=2, dpi=100, proj='2d')
+        self.dist_hist = MplCanvas(self, width=2, height=2, dpi=100, proj='2d')
+        self.stats_figs.addWidget(self.obs_hist)
+        self.stats_figs.addWidget(self.dist_hist)
 
         # configure outer layout
         self.outer_layout.addLayout(self.left_layout, 1)
-        self.outer_layout.addWidget(self.sc, 4)
-
+        self.outer_layout.addWidget(self.traj_fig, 4)
+        self.outer_layout.addLayout(self.stats_figs, 1)
         # set complete layout
         self.setLayout(self.outer_layout)
 
@@ -235,10 +249,10 @@ class MainWindow(QtWidgets.QWidget):
         z = self.df[obj_idx]['z'].values
 
         if not self.keep_plot:
-            self.sc.axes.clear()
+            self.traj_fig.axes.clear()
 
-        self.sc.plot_data(x, y, z)
-        self.sc.draw()
+        self.traj_fig.plot_data(x, y, z)
+        self.traj_fig.draw()
 
     def update_values(self):
         # get values from textboxes
@@ -261,6 +275,10 @@ class MainWindow(QtWidgets.QWidget):
         self.obj_list_widget.clear()
         obj_ids = braid_slicing.get_long_obj_ids_fast_pandas(self.df, length=self.min_obs)
 
+        #self.obs_hist.plot_hist(
+        #    self.df[self.df['obj_id'].isin(obj_ids)].groupby('obj_id').size().to_numpy()
+        #)
+
         obj_ids = braid_slicing.get_middle_of_tunnel_obj_ids_fast_pandas(
             self.df[self.df['obj_id'].isin(obj_ids)],
             zmin=self.zlim[0], zmax=self.zlim[1],
@@ -268,14 +286,16 @@ class MainWindow(QtWidgets.QWidget):
             xmin=self.xlim[0], xmax=self.xlim[1]
         )
 
-        obj_ids = braid_slicing.get_trajectories_that_travel_far(
+        obj_ids, lens = braid_slicing.get_trajectories_that_travel_far(
             self.df[self.df['obj_id'].isin(obj_ids)],
             axis=self.axes_to_filter,
             dist_travelled=self.dist
         )
 
+        # self.dist_hist.plot_hist(lens)
+
         # add the items to the list
-        self.obj_list_widget.addItems([str(obj) for obj in obj_ids])
+        self.obj_list_widget.addItems([str(obj) for obj in sorted(obj_ids)])
 
         # and at this point, the list is full and we can allow setting limit values
         self.min_obs_widget.setReadOnly(False)
@@ -283,6 +303,9 @@ class MainWindow(QtWidgets.QWidget):
         self.ylim_widget.setReadOnly(False)
         self.zlim_widget.setReadOnly(False)
         self.dist_widget.setReadOnly(False)
+        self.x_selector.setDisabled(False)
+        self.y_selector.setDisabled(False)
+        self.z_selector.setDisabled(False)
 
     def open_file_callback(self):
         options = QtWidgets.QFileDialog.Options()
