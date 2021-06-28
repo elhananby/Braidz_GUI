@@ -1,6 +1,7 @@
 import random
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
+from itertools import compress
 
 from fastnumbers import fast_real
 
@@ -29,7 +30,6 @@ class MplCanvas(FigureCanvasQTAgg):
         super(MplCanvas, self).__init__(fig)
         self.axes = fig.add_subplot(111, projection='3d')
         self.axes.clear()
-
 
     def plot_data(self, x, y, z):
         self.axes.set_xlim((-0.25, 0.25))
@@ -117,6 +117,8 @@ class MainWindow(QtWidgets.QWidget):
         self.zlim = [0., 0.3]
         self.dist = 0.0
 
+        self.axes_to_filter = ['x', 'y', 'z']
+
         self.keep_plot = False
 
         self.thread_pool = QtCore.QThreadPool()
@@ -139,36 +141,64 @@ class MainWindow(QtWidgets.QWidget):
         # grid layout for limits and obs numbers
         self.grid_layout = QtWidgets.QFormLayout()
 
+        # widget for minimum observation
         self.min_obs_widget = QtWidgets.QLineEdit()
         self.min_obs_widget.setText(str(self.min_obs))
         self.min_obs_widget.setReadOnly(True)
         self.min_obs_widget.returnPressed.connect(self.update_values)
 
+        # widget for x-axis limits
         self.xlim_widget = QtWidgets.QLineEdit()
         self.xlim_widget.setText(str(self.xlim))
         self.xlim_widget.setReadOnly(True)
         self.xlim_widget.returnPressed.connect(self.update_values)
 
+        # widget for y-axis limits
         self.ylim_widget = QtWidgets.QLineEdit()
         self.ylim_widget.setText(str(self.ylim))
         self.ylim_widget.setReadOnly(True)
         self.ylim_widget.returnPressed.connect(self.update_values)
 
+        # widget for z-axis limits
         self.zlim_widget = QtWidgets.QLineEdit()
         self.zlim_widget.setText(str(self.zlim))
         self.zlim_widget.setReadOnly(True)
         self.zlim_widget.returnPressed.connect(self.update_values)
 
+        # widget for setting minimum distance
         self.dist_widget = QtWidgets.QLineEdit()
         self.dist_widget.setText(str(self.dist))
         self.dist_widget.setReadOnly(True)
         self.dist_widget.returnPressed.connect(self.update_values)
 
+        # widget to select which distance we're interested in
+        self.axes_selector = QtWidgets.QHBoxLayout()
+        self.x_selector = QtWidgets.QCheckBox("x")
+        self.x_selector.setChecked(True)
+        self.x_selector.stateChanged.connect(self.axes_select)
+        self.x_selector.setDisabled(True)
+
+        self.y_selector = QtWidgets.QCheckBox("y")
+        self.y_selector.setChecked(True)
+        self.y_selector.stateChanged.connect(self.axes_select)
+        self.z_selector.setDisabled(True)
+
+        self.z_selector = QtWidgets.QCheckBox("z")
+        self.z_selector.setChecked(True)
+        self.z_selector.stateChanged.connect(self.axes_select)
+        self.z_selector.setDisabled(True)
+
+        self.axes_selector.addWidget(self.x_selector)
+        self.axes_selector.addWidget(self.y_selector)
+        self.axes_selector.addWidget(self.z_selector)
+
+        # setup all widgets in a grid
         self.grid_layout.addRow("Min Obs.", self.min_obs_widget)
         self.grid_layout.addRow("Xlim", self.xlim_widget)
         self.grid_layout.addRow("Ylim", self.ylim_widget)
         self.grid_layout.addRow("Zlim", self.zlim_widget)
         self.grid_layout.addRow("Dist", self.dist_widget)
+        self.grid_layout.addRow("Axes", self.axes_selector)
 
         # list view
         self.obj_list_widget = QtWidgets.QListWidget()
@@ -190,6 +220,13 @@ class MainWindow(QtWidgets.QWidget):
         # set complete layout
         self.setLayout(self.outer_layout)
 
+    def axes_select(self):
+        buttons_state = [self.x_selector.isChecked(), self.y_selector.isChecked(), self.z_selector.isChecked()]
+        axes = ['x', 'y', 'z']
+        self.axes_to_filter = list(compress(axes, buttons_state))
+
+        self.populate_list()
+
     def obj_selected(self, item):
         obj_id = int(item.text())
         obj_idx = (self.df['obj_id'] == obj_id).values
@@ -204,21 +241,22 @@ class MainWindow(QtWidgets.QWidget):
         self.sc.draw()
 
     def update_values(self):
+        # get values from textboxes
+
         self.min_obs = fast_real(re.compile(r'\d+').findall(self.min_obs_widget.text())[0])
 
-        p = re.compile(r'-?\d+\.\d+')
-
+        p = re.compile(r'-?\d+\.?\d?')
         self.xlim = [fast_real(i) for i in p.findall(self.xlim_widget.text())]
-
         self.ylim = [fast_real(i) for i in p.findall(self.ylim_widget.text())]
-
         self.zlim = [fast_real(i) for i in p.findall(self.zlim_widget.text())]
-
         self.dist = fast_real(p.findall(self.dist_widget.text())[0])
 
+        # and repopulate list
         self.populate_list()
 
     def populate_list(self):
+        # a function to populate list with cleaned obj_ids
+        # very inefficient
 
         self.obj_list_widget.clear()
         obj_ids = braid_slicing.get_long_obj_ids_fast_pandas(self.df, length=self.min_obs)
@@ -232,12 +270,14 @@ class MainWindow(QtWidgets.QWidget):
 
         obj_ids = braid_slicing.get_trajectories_that_travel_far(
             self.df[self.df['obj_id'].isin(obj_ids)],
-            axis='z',
+            axis=self.axes_to_filter,
             dist_travelled=self.dist
         )
 
+        # add the items to the list
         self.obj_list_widget.addItems([str(obj) for obj in obj_ids])
 
+        # and at this point, the list is full and we can allow setting limit values
         self.min_obs_widget.setReadOnly(False)
         self.xlim_widget.setReadOnly(False)
         self.ylim_widget.setReadOnly(False)
@@ -248,7 +288,7 @@ class MainWindow(QtWidgets.QWidget):
         options = QtWidgets.QFileDialog.Options()
         self.file_name, _ = QtWidgets.QFileDialog.getOpenFileName(self,
                                                                   caption="Open File",
-                                                                  filter="Braidz (*.braidz);;flydra h5 (*.h5)",
+                                                                  filter="Braidz/flydra (*.braidz *.h5)",
                                                                   options=options)
         self.status_line.setText("Opening file...")
         worker = Worker(self.open_file, self.file_name)
