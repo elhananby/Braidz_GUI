@@ -150,31 +150,31 @@ class MainWindow(QtWidgets.QWidget):
         # widget for minimum observation
         self.min_obs_widget = QtWidgets.QLineEdit()
         self.min_obs_widget.setText(str(self.min_obs))
-        self.min_obs_widget.setReadOnly(True)
+        self.min_obs_widget.setDisabled(True)
         self.min_obs_widget.returnPressed.connect(self.update_values)
 
         # widget for x-axis limits
         self.xlim_widget = QtWidgets.QLineEdit()
         self.xlim_widget.setText(str(self.xlim))
-        self.xlim_widget.setReadOnly(True)
+        self.xlim_widget.setDisabled(True)
         self.xlim_widget.returnPressed.connect(self.update_values)
 
         # widget for y-axis limits
         self.ylim_widget = QtWidgets.QLineEdit()
         self.ylim_widget.setText(str(self.ylim))
-        self.ylim_widget.setReadOnly(True)
+        self.ylim_widget.setDisabled(True)
         self.ylim_widget.returnPressed.connect(self.update_values)
 
         # widget for z-axis limits
         self.zlim_widget = QtWidgets.QLineEdit()
         self.zlim_widget.setText(str(self.zlim))
-        self.zlim_widget.setReadOnly(True)
+        self.zlim_widget.setDisabled(True)
         self.zlim_widget.returnPressed.connect(self.update_values)
 
         # widget for setting minimum distance
         self.dist_widget = QtWidgets.QLineEdit()
         self.dist_widget.setText(str(self.dist))
-        self.dist_widget.setReadOnly(True)
+        self.dist_widget.setDisabled(True)
         self.dist_widget.returnPressed.connect(self.update_values)
 
         # widget to select which distance we're interested in
@@ -230,7 +230,8 @@ class MainWindow(QtWidgets.QWidget):
         # configure outer layout
         self.outer_layout.addLayout(self.left_layout, 1)
         self.outer_layout.addWidget(self.traj_fig, 4)
-        self.outer_layout.addLayout(self.stats_figs, 1)
+        # self.outer_layout.addLayout(self.stats_figs, 1)
+
         # set complete layout
         self.setLayout(self.outer_layout)
 
@@ -255,8 +256,8 @@ class MainWindow(QtWidgets.QWidget):
         self.traj_fig.draw()
 
     def update_values(self):
-        # get values from textboxes
 
+        # get values from textboxes
         self.min_obs = fast_real(re.compile(r'\d+').findall(self.min_obs_widget.text())[0])
 
         p = re.compile(r'-?\d+\.?\d?')
@@ -298,11 +299,11 @@ class MainWindow(QtWidgets.QWidget):
         self.obj_list_widget.addItems([str(obj) for obj in sorted(obj_ids)])
 
         # and at this point, the list is full and we can allow setting limit values
-        self.min_obs_widget.setReadOnly(False)
-        self.xlim_widget.setReadOnly(False)
-        self.ylim_widget.setReadOnly(False)
-        self.zlim_widget.setReadOnly(False)
-        self.dist_widget.setReadOnly(False)
+        self.min_obs_widget.setDisabled(False)
+        self.xlim_widget.setDisabled(False)
+        self.ylim_widget.setDisabled(False)
+        self.zlim_widget.setDisabled(False)
+        self.dist_widget.setDisabled(False)
         self.x_selector.setDisabled(False)
         self.y_selector.setDisabled(False)
         self.z_selector.setDisabled(False)
