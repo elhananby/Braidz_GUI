@@ -125,7 +125,7 @@ class MainWindow(QtWidgets.QWidget):
 
         self.axes_to_filter = ['x', 'y', 'z']
 
-        self.keep_plot = False
+        self.keep_plot = True
 
         self.thread_pool = QtCore.QThreadPool()
 
@@ -209,7 +209,9 @@ class MainWindow(QtWidgets.QWidget):
 
         # list view
         self.obj_list_widget = QtWidgets.QListWidget()
-        self.obj_list_widget.itemClicked.connect(self.obj_selected)
+        self.obj_list_widget.setSelectionMode(QtWidgets.QListWidget.SingleSelection)
+        self.obj_list_widget.itemSelectionChanged.connect(self.obj_selected)
+        #self.obj_list_widget.itemChanged.connect(self.obj_selected)
 
         # configure left layout
         self.left_layout.addWidget(self.open_button)
@@ -242,17 +244,20 @@ class MainWindow(QtWidgets.QWidget):
 
         self.populate_list()
 
-    def obj_selected(self, item):
-        obj_id = int(item.text())
-        obj_idx = (self.df['obj_id'] == obj_id).values
-        x = self.df[obj_idx]['x'].values
-        y = self.df[obj_idx]['y'].values
-        z = self.df[obj_idx]['z'].values
+    def obj_selected(self):
+        items = self.obj_list_widget.selectedItems()
 
-        if not self.keep_plot:
-            self.traj_fig.axes.clear()
+        for item in items:
+            obj_id = int(item.text())
+            obj_idx = (self.df['obj_id'] == obj_id).values
+            x = self.df[obj_idx]['x'].values
+            y = self.df[obj_idx]['y'].values
+            z = self.df[obj_idx]['z'].values
 
-        self.traj_fig.plot_data(x, y, z)
+            if not self.keep_plot:
+                self.traj_fig.axes.clear()
+
+            self.traj_fig.plot_data(x, y, z)
         self.traj_fig.draw()
 
     def update_values(self):
